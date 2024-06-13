@@ -28,6 +28,12 @@ jobs:
       - name: Publish
         run: dotnet publish PriceFormula/PriceFormula.csproj -c Release -o release --nologo
 
+      - name: Change base-tag in index.html from / to PriceFormula
+        run: sed -i 's/<base href="\/" \/>/<base href="\/PriceFormula\/" \/>/g' release/wwwroot/index.html
+
+      - name: Add .nojekyll file
+        run: touch release/wwwroot/.nojekyll
+        
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:

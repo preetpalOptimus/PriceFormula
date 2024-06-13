@@ -1,0 +1,114 @@
+﻿@page "/"
+@rendermode InteractiveAuto
+@using Microsoft.CodeAnalysis.CSharp.Scripting
+@using Microsoft.CodeAnalysis.Scripting
+@using System.Reflection
+@using System.IO
+@using System.Linq
+@using System.Threading.Tasks
+@inject IJSRuntime JSRuntime
+
+<br />
+<div class="flex-container">
+    <div class="input-group">
+        <h4>Price Formula Code</h4>
+        <textarea id="input1" class="input-textarea" placeholder="Price Formula Code" rows="5" cols="80"></textarea>
+    </div>
+
+    <div class="input-group">
+        <h4>Flower Table</h4>
+        <textarea id="input4" class="input-textarea" placeholder="Flower Table" rows="5" cols="80"></textarea>
+    </div>
+</div>
+
+<div class="flex-container">
+    <div class="input-group">
+        <h4>General Code Table</h4>
+        <textarea id="input2" class="input-textarea" placeholder="General Code Table" rows="5" cols="80"></textarea>
+    </div>
+
+    <div class="input-group">
+        <h4>Formula Code Table</h4>
+        <textarea id="input3" class="input-textarea" placeholder="Formula Code Table" rows="5" cols="80"></textarea>
+    </div>
+</div>
+<button class="button" @onclick="ProcessInputsAndGenerateCode">Run</button>
+<br />
+<textarea @bind="code" class="output-textarea" rows="10" cols="80" style="display: none;"></textarea>
+<br />
+<button class="button" @onclick="ExecuteCode" style="display: none;">Run</button>
+
+<p id="costDetails">@result</p>
+
+@code {
+    private string code = string.Empty;
+    private string result = string.Empty;
+
+    private async Task ProcessInputsAndGenerateCode()
+    {
+        // Call JavaScript function to process inputs and generate C# code
+        code = await JSRuntime.InvokeAsync<string>("generateCSharpCodeFromInputs");
+        StateHasChanged();
+
+        await ExecuteCode();
+    }
+
+    private async Task ExecuteCode()
+    {
+        result = "Compiling...";
+        StateHasChanged();
+
+        try
+        {
+            var scriptOptions = ScriptOptions.Default
+                .WithReferences(AppDomain.CurrentDomain.GetAssemblies().Where(a => !a.IsDynamic && !string.IsNullOrWhiteSpace(a.Location)))
+                .WithImports("System", "System.Linq", "System.Collections.Generic");
+
+            var script = CSharpScript.Create(code, scriptOptions);
+            var compilation = script.GetCompilation();
+
+            using (var peStream = new MemoryStream())
+            {
+                var emitResult = compilation.Emit(peStream);
+
+                if (!emitResult.Success)
+                {
+                    result = string.Join("\n", emitResult.Diagnostics.Select(d => d.ToString()));
+                    return;
+                }
+
+                peStream.Seek(0, SeekOrigin.Begin);
+                var assembly = Assembly.Load(peStream.ToArray());
+
+                var entry = assembly.GetTypes()
+                                    .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
+                                    .FirstOrDefault(m => m.Name == "Main" && m.GetParameters().Length == 0);
+
+                if (entry == null)
+                {
+                    result = "No entry point found.";
+                    return;
+                }
+
+                using (var sw = new StringWriter())
+                {
+                    Console.SetOut(sw);
+
+                    entry.Invoke(null, null);
+
+                    result = sw.ToString();
+                    StateHasChanged();
+                }
+
+                if (!string.IsNullOrEmpty(result))
+                {
+                    await JSRuntime.InvokeVoidAsync("addStyles");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            result = ex.ToString();
+        }
+    }
+}
